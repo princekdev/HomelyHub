@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import toast from "react-hot-toast";
 import { formatPrice, nightsBetween } from "../utils/format";
-import { createBooking } from "../services/bookingService";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
+import { Eye, ShieldCheck } from "lucide-react";
 
 const SERVICE_FEE_RATE = 0.05;
 
@@ -13,25 +13,26 @@ const BookingCard = ({ property }) => {
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [guests, setGuests] = useState(1);
-  const [submitting, setSubmitting] = useState(false);
 
   const nights = useMemo(() => nightsBetween(checkIn, checkOut), [checkIn, checkOut]);
   const subtotal = nights * property.pricePerNight;
   const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
   const total = subtotal + (property.cleaningFee || 0) + serviceFee;
 
-  const isOwnProperty = user && property.host?._id === user._id;
-  const canBook = checkIn && checkOut && nights > 0 && !isOwnProperty;
-
   const today = new Date().toISOString().split("T")[0];
 
-  const handleReserve = async () => {
+  // Robust comparison — host may be a populated object OR a raw ObjectId string
+  const hostId = property.host?._id ?? property.host;
+  const isOwnProperty =
+    isAuthenticated && user && hostId?.toString() === user._id?.toString();
+
+  const handleReserve = () => {
     if (!isAuthenticated) {
       toast.error("Please log in to book this property");
       navigate("/login");
       return;
     }
-    if (!canBook) {
+    if (!checkIn || !checkOut || nights <= 0) {
       toast.error("Please select valid check-in and check-out dates");
       return;
     }
@@ -39,25 +40,59 @@ const BookingCard = ({ property }) => {
       toast.error(`This property allows a maximum of ${property.guests} guests`);
       return;
     }
-
-    setSubmitting(true);
-    try {
-      await createBooking({
-        propertyId: property._id,
-        checkIn,
-        checkOut,
-        guests: Number(guests),
-      });
-      toast.success("Booking request sent! Check My Bookings for status.");
-      navigate("/bookings");
-    } catch (err) {
-      const message = err.response?.data?.message || "Could not create booking";
-      toast.error(message);
-    } finally {
-      setSubmitting(false);
-    }
+    navigate(`/checkout/${property._id}`, {
+      state: { checkIn, checkOut, guests: Number(guests) },
+    });
   };
 
+  // ── Host/Admin preview panel ──────────────────────────────────────────────
+  if (isOwnProperty) {
+    return (
+      <div className="card-surface p-5 lg:sticky lg:top-24 space-y-4">
+        <div className="flex items-baseline justify-between">
+          <p className="text-xl font-semibold">
+            {formatPrice(property.pricePerNight)}
+            <span className="text-sm font-normal text-ink-500"> / night</span>
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-ink-50 border border-ink-200 px-4 py-3 text-sm text-ink-600 flex items-start gap-2">
+          <Eye size={15} className="shrink-0 mt-0.5 text-ink-400" />
+          <span>
+            <span className="font-medium text-ink-800">This is your property.</span>{" "}
+            Guests will see a full booking &amp; payment form here.
+          </span>
+        </div>
+
+        <div className="rounded-xl bg-brand-50 border border-brand-100 px-4 py-3 text-xs text-brand-700 flex items-start gap-2">
+          <ShieldCheck size={13} className="shrink-0 mt-0.5" />
+          <span>
+            To test the booking flow, log in with a guest account (e.g.{" "}
+            <strong>priya@homelyhub.com</strong>) and visit this property.
+          </span>
+        </div>
+
+        <div className="text-xs text-ink-400 border-t border-ink-100 pt-3 space-y-1">
+          <div className="flex justify-between">
+            <span>Price per night</span>
+            <span>{formatPrice(property.pricePerNight)}</span>
+          </div>
+          {property.cleaningFee > 0 && (
+            <div className="flex justify-between">
+              <span>Cleaning fee</span>
+              <span>{formatPrice(property.cleaningFee)}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span>Service fee (5%)</span>
+            <span>calculated at checkout</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Guest booking panel ───────────────────────────────────────────────────
   return (
     <div className="card-surface p-5 lg:sticky lg:top-24">
       <div className="flex items-baseline justify-between mb-4">
@@ -104,10 +139,9 @@ const BookingCard = ({ property }) => {
 
       <button
         onClick={handleReserve}
-        disabled={submitting || isOwnProperty}
         className="btn-primary w-full justify-center"
       >
-        {submitting ? "Reserving..." : isOwnProperty ? "This is your property" : "Reserve"}
+        Reserve
       </button>
 
       {nights > 0 && (
@@ -132,8 +166,8 @@ const BookingCard = ({ property }) => {
           </div>
         </div>
       )}
-      <p className="text-[11px] text-ink-400 mt-4">
-        You won't be charged yet. This is a demo booking flow — no real payment is processed.
+      <p className="text-[11px] text-ink-400 mt-4 text-center">
+        You won't be charged until you confirm on the next step.
       </p>
     </div>
   );
